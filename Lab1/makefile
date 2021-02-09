@@ -8,7 +8,7 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 $(info This is my Ubuntu)
 yash: main.c
-	gcc -g  -L/usr/include/readline -lreadline -o yash main.c 
+	gcc -g  -L/usr/include/readline  -o yash main.c -lreadline
 
 clean:
 	rm *.o yash

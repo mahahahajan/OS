@@ -215,7 +215,7 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 		}
 		if (isPipe != 1) {
 			if (currProcess->output_file) {
-				printf("reached outFile set up \n");
+				// printf("reached outFile set up \n");
 				int outFile = open(currProcess->output_file, O_CREAT | O_WRONLY | O_TRUNC,
 								   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 				dup2(outFile, 1);
@@ -251,7 +251,7 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 		// printf("THe command is %s and PID is %i and PGID is %d (just set pgid) \n", currProcess->arg1, pid, getpgid(0));
 		int validate = execvp(currProcess->argv[0], currProcess->argv);
 		if (validate == -1) {
-			printf("TESt \n");
+			// printf("TESt \n");
 			_exit(-1);
 		}
 	}
@@ -272,17 +272,20 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 	// }
 	return pid;
 }
-int getNextJob(job jobsArr[])
+job* getNextJob(job* jobsArr[])
 {
 	int jobFound = -1;
+
 	for (int i = 0; i < 20; i++) {
-		if (jobsArr[i].status == EMPTY) {
+		if (jobsArr[i]->status == EMPTY) {
 			//Found spot for job.
-			jobsArr[i].status = RUNNING;
-			return i;
+
+			jobsArr[i]->status = RUNNING;
+			jobsArr[i]->jobid = i;
+			return jobsArr[i];
 		}
 	}
-	return 0;
+	return jobsArr[0];
 }
 
 char* enumToString(enum Status val)
@@ -299,12 +302,12 @@ char* enumToString(enum Status val)
 	}
 }
 
-void print_jobs(job jobsArr[])
+void print_jobs(job* jobsArr[])
 {
 	for (int i = 0; i < 20; i++) {
 		// printf("jobs at %i is %s \n", i, enumToString(jobsArr[i].status));
-		if(jobsArr[i].status != EMPTY){
-			printf("[%d] - %s\t\t%s\n", i, enumToString(jobsArr[i].status), jobsArr[i].jobStr);
+		if (jobsArr[i]->status != EMPTY) {
+			printf("[%d] - %s\t\t%s\n", i, enumToString(jobsArr[i]->status), jobsArr[i]->jobStr);
 		}
 	}
 }
@@ -313,19 +316,27 @@ int main()
 {
 	char** myTokens = (char**)malloc(sizeof(char*) * 2000);
 	int fd[2];
+
 	// printf() displays the string inside quotation
-	job jobsArr[20];
+	job* jobsArr[20];
 	for (int i = 0; i < 20; i++) {
-		jobsArr[i].status = EMPTY;
+		jobsArr[i] = (job*)malloc(sizeof(job));
+		jobsArr[i]->status = EMPTY;
 	}
 	while (1) {
 		char* input = readline("# ");
 		char* ogInput;
+		int pid = -1;
+		int pid2 = -1;
 		// inputPtr = input;
-
+		if (strcmp(input, "") == 0 || strcmp(input, " ") == 0) {
+			// printf("Why am i not hitting this \n");
+			continue;
+		}
 		//double pointer like arraylist
 		if (input != NULL) {
 			//Want to save the string so that I can list in jobs
+			// printf(" the input is %s \n", input);
 			ogInput = strdup(input);
 		}
 
@@ -333,15 +344,21 @@ int main()
 		process* currProcess = makeProcess(input);
 		process* processLeft = NULL;
 		process* processRight = NULL;
-		//TODO: check if bg, fg, jobs, etc
-		int pid;
-		int pid2 = -1;
+
 		int status;
+		//TODO: check if bg, fg, jobs, etc
+		if (strcmp(currProcess->arg1, "jobs") == 0) {
+			print_jobs(jobsArr);
+			continue;
+		}
+		if(strcmp(currProcess->arg1, "bg") == 0){
+			
+		}
 		if (currProcess->baseCommand == 1) {  //No pipes, no redirects, run command as is
 			//Single command
 			// printProcess(currProcess);
 			// printf("\n \n \n");
-
+			// printf("test \n");
 			pid = runProcess(currProcess, 0, -1, NULL, -1);
 			waitpid(pid, &status, 0);
 			// printf("\n \n \n");
@@ -373,14 +390,15 @@ int main()
 				}
 			}
 		}
-		job* newJob = malloc(sizeof(job));
+		job* newJob = getNextJob(jobsArr);
+		// printf("Try and abed in the morning \n ");
 		newJob->jobStr = ogInput;
 		newJob->pGid = pid;
 		newJob->status = RUNNING;
 		newJob->next = NULL;
-		newJob->jobid = getNextJob(jobsArr);
+		// newJob->jobid = getNextJob(jobsArr);
 		//TODO: check if bg job otherwise handle waits
-
+		// printf("Cool cool cool \n");
 		if (processRight != NULL) {	 //This means that i have a pipe for sure
 			pipe(fd);				 //TODO: handle error
 			pid = runProcess(processLeft, 1, 0, fd, -1);

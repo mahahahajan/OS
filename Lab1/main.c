@@ -14,7 +14,10 @@ enum Redirect { Input = 0,
 				Output = 1 };
 enum Side { LEFT = 0,
 			RIGHT = 1 };
-enum Status { STOPPED = -1, RUNNING = 0, DONE = 1 };
+enum Status { EMPTY = -2,
+			  STOPPED = -1,
+			  RUNNING = 0,
+			  DONE = 1 };
 
 #define PROCESS_GROUP 10
 typedef struct process {
@@ -33,8 +36,9 @@ typedef struct process {
 	enum Side pipeSide;	 //TODO: create enum for sides
 } process;
 
-typedef struct job_t {
+typedef struct job {
 	int jobid;
+	char* jobStr;
 	pid_t pGid;
 	enum Status status;
 	struct job_t* next;
@@ -62,10 +66,36 @@ static void sig_handler(int signo)
 	}
 }
 
+void printProcess(process* p)
+{
+	printf("Arg1 is %s \n", p->arg1);
+	printf("should have %i tokens \n", p->numTokens);
+	for (int i = 0; i < (p->numTokens) + 1; i++) {
+		printf("curr arg is %s at index %i \n", p->argv[i], i);
+	}
+	// printf("")
+}
+void cleanProcess(process* p)
+{
+	p->arg1 = NULL;	 //Ex. this would be "ls", then argv should be "-l"
+	p->argv = NULL;	 // all arguments
+	p->numTokens = -1;
+	p->numRedirects = -1;  //how many redirects
+	p->outRedirectLoc = -1;
+	p->inRedirectLoc = -1;
+	p->errRedirectLoc = -1;
+	p->pipeLoc = -1;	  //how many pipes
+	p->baseCommand = -1;  //use as bool -- 0 is false, 1 is true
+	p->output_file = NULL;
+	p->input_file = NULL;
+	p->error_file = NULL;
+}
+
 process* makeProcess(char* inputStr)
 {
 	//track number for a loop later
 	process* newProcess = malloc(sizeof(process));
+	cleanProcess(newProcess);
 	char** argv = (char**)malloc(sizeof(char*) * 2000);
 	int numTokens = 0;
 	int pipeLoc = 0;
@@ -107,7 +137,6 @@ process* makeProcess(char* inputStr)
 			newProcess->argv[numTokens] = currToken;
 			numTokens++;
 		}
-
 		currToken = strtok(NULL, " ");
 	}
 	// tokensArr[numTokens] = NULL;
@@ -179,14 +208,14 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 	// printf("Im in runProcess \n");
 	// printf("the out file is %s \n", currProcess -> output_file);
 	int pid = fork();
-	printf("THe command is %s and PID is %i and PGID is %d \n", currProcess->arg1, pid, getpgid(0));
+	// printf("THe command is %s and PID is %i and PGID is %d \n", currProcess->arg1, pid, getpgid(0));
 	if (pid == 0) {
 		if (pgid != -1) {
 			int newPgid = setpgid(0, pgid);
 		}
-		if (!isPipe) {
+		if (isPipe != 1) {
 			if (currProcess->output_file) {
-				// printf("reached outFile set up \n");
+				printf("reached outFile set up \n");
 				int outFile = open(currProcess->output_file, O_CREAT | O_WRONLY | O_TRUNC,
 								   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 				dup2(outFile, 1);
@@ -194,7 +223,7 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 			if (currProcess->input_file) {
 				// printf("reached inFile set up \n");
 				int inFile = open(currProcess->input_file, O_RDONLY);  //TODO: numTokens -1 isn't always the one
-				if(inFile == -1){
+				if (inFile == -1) {
 					return -1;
 				}
 				dup2(inFile, 0);
@@ -207,7 +236,7 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 		}
 		else {
 			//is a pipe
-			if (!isRight) {
+			if (isRight == 0) {
 				//Left
 				close(fd[0]);
 				dup2(fd[1], 1);
@@ -219,10 +248,11 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 			}
 		}
 		setpgid(0, 0);
-		printf("THe command is %s and PID is %i and PGID is %d (just set pgid) \n", currProcess->arg1, pid, getpgid(0));
-		int validate = execvp(currProcess->arg1, currProcess->argv);
+		// printf("THe command is %s and PID is %i and PGID is %d (just set pgid) \n", currProcess->arg1, pid, getpgid(0));
+		int validate = execvp(currProcess->argv[0], currProcess->argv);
 		if (validate == -1) {
-			exit(-1);
+			printf("TESt \n");
+			_exit(-1);
 		}
 	}
 	// else {
@@ -242,68 +272,90 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 	// }
 	return pid;
 }
+int getNextJob(job jobsArr[])
+{
+	int jobFound = -1;
+	for (int i = 0; i < 20; i++) {
+		if (jobsArr[i].status == EMPTY) {
+			//Found spot for job.
+			jobsArr[i].status = RUNNING;
+			return i;
+		}
+	}
+	return 0;
+}
 
+char* enumToString(enum Status val)
+{
+	switch (val) {
+	case EMPTY:
+		return "EMPTY";
+	case STOPPED:
+		return "Stopped";
+	case RUNNING:
+		return "Running";
+	case DONE:
+		return "Done";
+	}
+}
+
+void print_jobs(job jobsArr[])
+{
+	for (int i = 0; i < 20; i++) {
+		// printf("jobs at %i is %s \n", i, enumToString(jobsArr[i].status));
+		if(jobsArr[i].status != EMPTY){
+			printf("[%d] - %s\t\t%s\n", i, enumToString(jobsArr[i].status), jobsArr[i].jobStr);
+		}
+	}
+}
 
 int main()
 {
 	char** myTokens = (char**)malloc(sizeof(char*) * 2000);
 	int fd[2];
-	char* inputPtr;
-	
-
 	// printf() displays the string inside quotation
+	job jobsArr[20];
+	for (int i = 0; i < 20; i++) {
+		jobsArr[i].status = EMPTY;
+	}
 	while (1) {
-		char *input = readline("# "), *inputStr;
-		inputPtr = input;
+		char* input = readline("# ");
+		char* ogInput;
+		// inputPtr = input;
 
 		//double pointer like arraylist
 		if (input != NULL) {
-			inputStr = strdup(input);
+			//Want to save the string so that I can list in jobs
+			ogInput = strdup(input);
 		}
 
 		//TODO: Tokenize function to split inputStr into pieces?
 		process* currProcess = makeProcess(input);
-
+		process* processLeft = NULL;
+		process* processRight = NULL;
 		//TODO: check if bg, fg, jobs, etc
-		int pid, pid2;
+		int pid;
+		int pid2 = -1;
 		int status;
 		if (currProcess->baseCommand == 1) {  //No pipes, no redirects, run command as is
 			//Single command
-			// int pid = fork();
+			// printProcess(currProcess);
+			// printf("\n \n \n");
+
 			pid = runProcess(currProcess, 0, -1, NULL, -1);
-			
-			// if (pid == 0) {
-			// 	//child
-			// 	int val = execvp(currProcess->arg1, currProcess->argv);
-			// 	printf("status was %i \n", val);
-			// }
-			// else {
-			// 	
-			// }
 			waitpid(pid, &status, 0);
+			// printf("\n \n \n");
+			// printf("ran base command \n");
+			// printProcess(currProcess);
+			continue;
 		}
 		else {
 			if (currProcess->pipeLoc != 0) {
 				//TODO: set up pipes here
-				process* processLeft = currProcess;
+				processLeft = currProcess;
 				//Split process turns one process with a pipe into 2
-				process* processRight = splitProcess(currProcess);
+				processRight = splitProcess(currProcess);
 				int index = currProcess->pipeLoc;
-				pipe(fd);  //TODO: handle error
-				pid = runProcess(processLeft, 1, 0, fd, -1);
-				printf("PID1 is %i \n", pid);
-				// int pgid = getpgrp();
-				setpgid(pid, 0);
-				pid2 = runProcess(processRight, 1, 1, fd, pid);
-				// waitpid(pid, &status, 0);
-				close(fd[0]);
-				close(fd[1]);
-
-				waitpid(pid, &status, 0);
-				waitpid(pid2, &status, 0);
-				// waitpid(pid, &status, 0);
-				free(processLeft);
-				free(processRight);
 			}
 			if (currProcess->numRedirects != 0) {
 				// printf("Have a redirect  \n");
@@ -319,14 +371,42 @@ int main()
 					currProcess->input_file = currProcess->argv[inRedirectToken];
 					currProcess->argv[inRedirectToken] = NULL;
 				}
-				pid = runProcess(currProcess, 0, -1, NULL, -1);
-				waitpid(pid, &status, 0);
 			}
-			
 		}
+		job* newJob = malloc(sizeof(job));
+		newJob->jobStr = ogInput;
+		newJob->pGid = pid;
+		newJob->status = RUNNING;
+		newJob->next = NULL;
+		newJob->jobid = getNextJob(jobsArr);
+		//TODO: check if bg job otherwise handle waits
+
+		if (processRight != NULL) {	 //This means that i have a pipe for sure
+			pipe(fd);				 //TODO: handle error
+			pid = runProcess(processLeft, 1, 0, fd, -1);
+			// printf("PID1 is %i \n", pid);
+			// int pgid = getpgrp();
+			setpgid(pid, 0);
+			pid2 = runProcess(processRight, 1, 1, fd, pid);
+			// waitpid(pid, &status, 0);
+		}
+		else {
+			// printf("testing \n");
+			pid = runProcess(currProcess, 0, -1, NULL, -1);
+		}
+		waitpid(pid, &status, 0);
+		if (pid2 != -1) {
+			close(fd[0]);
+			close(fd[1]);
+			waitpid(pid2, &status, 0);
+			free(processRight->argv);
+			free(processRight);
+		}
+		free(input);
+		free(currProcess->argv);
+		free(currProcess);
 	}
 	free(myTokens);
-	free(inputPtr);
 	return 0;
 }
 

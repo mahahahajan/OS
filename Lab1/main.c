@@ -14,6 +14,7 @@ enum Redirect { Input = 0,
 				Output = 1 };
 enum Side { LEFT = 0,
 			RIGHT = 1 };
+enum Status { STOPPED = -1, RUNNING = 0, DONE = 1 };
 
 #define PROCESS_GROUP 10
 typedef struct process {
@@ -34,18 +35,29 @@ typedef struct process {
 
 typedef struct job_t {
 	int jobid;
-	//   pgid_t pgid;
-	char* jobstring;
-	//   status_t status;
+	pid_t pGid;
+	enum Status status;
 	struct job_t* next;
-} job_t;
+} job;
 
 //So apparently tokens is a keyword?
 static void sig_handler(int signo)
 {
+	int pid = getpid();
 	switch (signo) {
+	case SIGCHLD:
+		//TODO: This case
+		printf("Caught sig child \n");
+		break;
 	case SIGINT:
-		printf("caught SIGINT, PID: %d\n", getpid());
+		// printf("caught SIGINT, PID: %d \n", getpid());
+		kill(pid, SIGINT);
+		waitpid(pid, 0, WNOHANG | WUNTRACED);
+		break;
+	case SIGTSTP:
+		// printf("caught SIGINT, PID: %d \n", getpid());
+		kill(pid, SIGTSTP);
+		waitpid(pid, 0, WNOHANG | WUNTRACED);
 		break;
 	}
 }
@@ -182,10 +194,13 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 			if (currProcess->input_file) {
 				// printf("reached inFile set up \n");
 				int inFile = open(currProcess->input_file, O_RDONLY);  //TODO: numTokens -1 isn't always the one
+				if(inFile == -1){
+					return -1;
+				}
 				dup2(inFile, 0);
 			}
 			if (currProcess->error_file) {
-				int outFile = open(currProcess->output_file, O_CREAT | O_WRONLY | O_TRUNC,
+				int outFile = open(currProcess->error_file, O_CREAT | O_WRONLY | O_TRUNC,
 								   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 				dup2(outFile, 2);
 			}
@@ -228,33 +243,44 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 	return pid;
 }
 
+
 int main()
 {
 	char** myTokens = (char**)malloc(sizeof(char*) * 2000);
 	int fd[2];
 	char* inputPtr;
+	
+
 	// printf() displays the string inside quotation
 	while (1) {
 		char *input = readline("# "), *inputStr;
 		inputPtr = input;
+
 		//double pointer like arraylist
 		if (input != NULL) {
 			inputStr = strdup(input);
 		}
+
 		//TODO: Tokenize function to split inputStr into pieces?
 		process* currProcess = makeProcess(input);
+
+		//TODO: check if bg, fg, jobs, etc
+		int pid, pid2;
+		int status;
 		if (currProcess->baseCommand == 1) {  //No pipes, no redirects, run command as is
 			//Single command
-			int pid = fork();
-			int status;
-			if (pid == 0) {
-				//child
-				int val = execvp(currProcess->arg1, currProcess->argv);
-				printf("status was %i \n", val);
-			}
-			else {
-				waitpid(pid, &status, 0);
-			}
+			// int pid = fork();
+			pid = runProcess(currProcess, 0, -1, NULL, -1);
+			
+			// if (pid == 0) {
+			// 	//child
+			// 	int val = execvp(currProcess->arg1, currProcess->argv);
+			// 	printf("status was %i \n", val);
+			// }
+			// else {
+			// 	
+			// }
+			waitpid(pid, &status, 0);
 		}
 		else {
 			if (currProcess->pipeLoc != 0) {
@@ -263,9 +289,8 @@ int main()
 				//Split process turns one process with a pipe into 2
 				process* processRight = splitProcess(currProcess);
 				int index = currProcess->pipeLoc;
-				int status;
 				pipe(fd);  //TODO: handle error
-				int pid = runProcess(processLeft, 1, 0, fd, -1), pid2;
+				pid = runProcess(processLeft, 1, 0, fd, -1);
 				printf("PID1 is %i \n", pid);
 				// int pgid = getpgrp();
 				setpgid(pid, 0);
@@ -294,10 +319,10 @@ int main()
 					currProcess->input_file = currProcess->argv[inRedirectToken];
 					currProcess->argv[inRedirectToken] = NULL;
 				}
-				int status;
-				int pid = runProcess(currProcess, 0, -1, NULL, -1);
+				pid = runProcess(currProcess, 0, -1, NULL, -1);
 				waitpid(pid, &status, 0);
 			}
+			
 		}
 	}
 	free(myTokens);

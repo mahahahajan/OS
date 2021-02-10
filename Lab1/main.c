@@ -73,14 +73,15 @@ static void sig_handler(int signo)
 	// 	printf("Caught sig child \n");
 	// 	break;
 	case SIGINT:
-		// printf("caught SIGINT, PID: %d \n", getpid());
-		kill(jobsArr[mostRecentJob]->pGid, SIGINT);
-		waitpid(most, 0, WNOHANG | WUNTRACED);
+		// printf("caught SIGINT, PID parent: %d \t PID process: %d \n", getpid(), jobsArr[mostRecentFG]->pGid);
+		kill(-jobsArr[mostRecentFG-1]->pGid, SIGINT);
+		waitpid(jobsArr[mostRecentJob-1]->pGid, 0, WNOHANG | WUNTRACED);
 		break;
 	case SIGTSTP:
-		// printf("caught SIGINT, PID: %d \n", getpid());
-		kill(jobsArr[mostRecentJob]->pGid, SIGTSTP);
-		waitpid(pid, 0, WNOHANG | WUNTRACED);
+		// printf("caught SIGTSTP, PID parent: %d \t PID process: %d \n", getpid(), jobsArr[mostRecentJob]->pGid);
+		kill(jobsArr[mostRecentJob-1]->pGid, SIGTSTP);
+		jobsArr[mostRecentJob-1]->status = STOPPED;
+		waitpid(jobsArr[mostRecentJob-1]->pGid, 0, WNOHANG | WUNTRACED);
 		break;
 	}
 }
@@ -239,7 +240,7 @@ process* splitProcess(process* currProcess)
 
 int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pgid)
 {
-	// printf("Im in runProcess \n");
+	
 	// printf("the out file is %s \n", currProcess -> output_file);
 	int pid = fork();
 	// printf("THe command is %s and PID is %i and PGID is %d \n", currProcess->arg1, pid, getpgid(0));
@@ -286,7 +287,7 @@ int runProcess(process* currProcess, int isPipe, int isRight, int fd[], pid_t pg
 		int validate = execvp(currProcess->argv[0], currProcess->argv);
 		if (validate == -1) {
 			// printf("TESt \n");
-			_exit(-1);
+			exit(-1);
 		}
 	}
 	// else {
@@ -314,7 +315,7 @@ job* getNextJob(job* jobsArr[])
 		if (jobsArr[i]->status == EMPTY) {
 			//Found spot for job
 			jobsArr[i]->status = RUNNING;
-			jobsArr[i]->jobid = i;
+			jobsArr[i]->jobid = i+1;
 			return jobsArr[i];
 		}
 	}
@@ -383,7 +384,7 @@ void print_jobs(job* jobsArr[], int mostRecentJob)
 			if (i == mostRecentJob) {
 				use = '+';
 			}
-			printf("[%d]%c %s\t\t%s\n", i, use, enumToString(jobsArr[i]->status), jobsArr[i]->jobStr);
+			printf("[%d]%c %s\t\t%s\n", jobsArr[i]->jobid, use, enumToString(jobsArr[i]->status), jobsArr[i]->jobStr);
 			use = '-';
 		}
 	}
@@ -408,13 +409,19 @@ int main()
 		// signal(SIGCHLD, sig_handler);
 		signal(SIGTSTP, sig_handler);
 
-		update_jobs(jobsArr, mostRecentJob, status);
+		
 
 		char* input = readline("# ");
 		char* ogInput;
 		int pid = -1;
 		int pid2 = -1;
 		bool bgPresent = false;
+
+		update_jobs(jobsArr, mostRecentJob, status);
+		if(input == NULL){
+			printf("\n");
+			break;
+		}
 		// inputPtr = input;
 		if (strcmp(input, "") == 0 || strcmp(input, " ") == 0) {
 			// printf("Why am i not hitting this \n");
@@ -458,6 +465,7 @@ int main()
 		}
 		if (currProcess->numRedirects != 0) {
 			//TODO: set up redirects
+			
 			int outRedirectToken = currProcess->outRedirectLoc;
 			int inRedirectToken = currProcess->inRedirectLoc;
 			if (outRedirectToken > 0) {
@@ -492,6 +500,7 @@ int main()
 				bgPresent = true;
 			}
 			pid = runProcess(currProcess, 0, -1, NULL, -1);
+			setpgid(pid, 0);
 		}
 		job* newJob = getNextJob(jobsArr);
 		// printf("Try and abed in the morning \n ");
@@ -500,24 +509,30 @@ int main()
 		newJob->status = RUNNING;
 		mostRecentJob = newJob->jobid;
 		newJob->next = NULL;
-
+		// print_jobs(jobsArr, mostRecentJob);
 		if (currProcess->isBackgroundJob == 1) {
 			waitpid(pid, &status, WNOHANG | WUNTRACED);
 		}
 		else {
 			mostRecentFG = newJob->jobid;
-			waitpid(pid, &status, WUNTRACED);
-			if (!WIFSTOPPED(status)) {
+			if(!bgPresent){
+				waitpid(pid, &status, WUNTRACED);
+				if (!WIFSTOPPED(status)) {
 				//TODO: Clean job;
 				// remove_job(job->jobid, (job_t*)root, NULL);
-				clean_job(jobsArr[mostRecentJob]);
+					//REMEMBER TO OFFSET BY 1 
+					clean_job(jobsArr[mostRecentJob-1]);
+					print_jobs(jobsArr, mostRecentJob);
+				}
 			}
+			
 		}
 		if (pid2 != -1) {
 			newJob->pGid2 = pid2;
 			close(fd[0]);
 			close(fd[1]);
 			if (processRight->isBackgroundJob == 1) {
+				// printf("testing \n");
 				waitpid(pid2, &status, WNOHANG | WUNTRACED);
 			}
 			else {
@@ -536,7 +551,9 @@ int main()
 		free(currProcess);
 	}
 	free(myTokens);
-	free(jobsArr);
+	for(int i = 0; i < 20; i++){
+		free(jobsArr[i]);
+	}
 	return 0;
 }
 
